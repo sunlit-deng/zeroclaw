@@ -1225,27 +1225,7 @@ impl Dashboard {
 
         let mut lines = Vec::new();
         if let Some(obj) = h.as_object() {
-            let label_width = health_status_label_width();
-
-            // Overall status
-            if let Some(uptime) = obj.get("uptime_seconds").and_then(|v| v.as_u64()) {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        status_label("zc-dashboard-label-uptime", label_width),
-                        theme::dim_style(),
-                    ),
-                    Span::styled(format_uptime(uptime), theme::body_style()),
-                ]));
-            }
-            if let Some(pid) = obj.get("pid").and_then(|v| v.as_u64()) {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        status_label("zc-dashboard-label-pid", label_width),
-                        theme::dim_style(),
-                    ),
-                    Span::styled(pid.to_string(), theme::body_style()),
-                ]));
-            }
+            lines.extend(health_status_lines(obj));
 
             // Process stats
             if let Some(process) = obj.get("process") {
@@ -2944,6 +2924,33 @@ fn health_status_label_width() -> usize {
     )
 }
 
+fn health_status_lines(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<Line<'static>> {
+    let label_width = health_status_label_width();
+    let mut lines = Vec::new();
+
+    // Overall status
+    if let Some(uptime) = obj.get("uptime_seconds").and_then(|v| v.as_u64()) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                status_label("zc-dashboard-label-uptime", label_width),
+                theme::dim_style(),
+            ),
+            Span::styled(format_uptime(uptime), theme::body_style()),
+        ]));
+    }
+    if let Some(pid) = obj.get("pid").and_then(|v| v.as_u64()) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                status_label("zc-dashboard-label-pid", label_width),
+                theme::dim_style(),
+            ),
+            Span::styled(pid.to_string(), theme::body_style()),
+        ]));
+    }
+
+    lines
+}
+
 fn status_label_width<I, S>(labels: I) -> usize
 where
     I: IntoIterator<Item = S>,
@@ -3505,6 +3512,38 @@ mod tests {
         assert_eq!(
             crate::display_width::display_width(&padded_status_label("PID", width)),
             width
+        );
+    }
+
+    #[test]
+    fn health_status_lines_use_catalogue_labels_and_align_values() {
+        let health = serde_json::json!({
+            "uptime_seconds": 60_u64,
+            "pid": 1234_u64,
+        });
+        let lines = health_status_lines(health.as_object().expect("health object"));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0].spans[0].content.as_ref(),
+            status_label("zc-dashboard-label-uptime", health_status_label_width())
+        );
+        assert_eq!(
+            lines[1].spans[0].content.as_ref(),
+            status_label("zc-dashboard-label-pid", health_status_label_width())
+        );
+        assert_eq!(lines[0].spans[1].content.as_ref(), "1m");
+        assert_eq!(lines[1].spans[1].content.as_ref(), "1234");
+
+        let value_columns = lines
+            .iter()
+            .map(|line| crate::display_width::display_width(line.spans[0].content.as_ref()))
+            .collect::<Vec<_>>();
+        assert_eq!(value_columns[0], value_columns[1]);
+        assert!(
+            value_columns[0]
+                > crate::display_width::display_width(&crate::i18n::t("zc-dashboard-label-uptime")),
+            "translated uptime label must retain a separating cell"
         );
     }
 
