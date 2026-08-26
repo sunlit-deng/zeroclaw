@@ -642,11 +642,11 @@ pub const SOP_STEP_SYNTAX_CATALOG: &[SopStepSyntaxSpec] = &[
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::When,
-        description: "`- when:` guards an explicit `- next:` jump and is evaluated against accumulated completed-step outputs after the current step finishes; a matching guard takes the jump, while a false guard follows the linear successor or completes a terminal step.",
+        description: "`- when:` is evaluated against accumulated completed-step outputs after the current step finishes. A false guard bypasses `switch` and explicit `next`, taking the linear successor or completing when the step is terminal or has no successor. With a true or absent guard, a non-empty `switch` takes precedence over `next`; without a switch, an explicit `next` is used before terminal or linear routing.",
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::Next,
-        description: "`- next:` routes to an explicit successor step; ineligible routed steps are marked `skipped` and leave the run `pending` instead of dispatching.",
+        description: "`- next:` routes to an explicit successor only when the top-level `when` allows routing and no `switch` ports are declared; ineligible routed steps are marked `skipped` and leave the run `pending` instead of dispatching.",
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::Terminal,
@@ -658,7 +658,7 @@ pub const SOP_STEP_SYNTAX_CATALOG: &[SopStepSyntaxSpec] = &[
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::Switch,
-        description: "`- switch:` defines ordered `name>condition>step` ports for multi-branch routing.",
+        description: "`- switch:` defines ordered `name>condition>step` ports for multi-branch routing. With a true or absent top-level `when`, the first matching port wins; an unmatched switch completes the run, and `next` plus the linear successor are ignored. A false top-level `when` bypasses switch evaluation.",
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::OnFailure,
@@ -682,7 +682,7 @@ pub const SOP_STEP_SYNTAX_CATALOG: &[SopStepSyntaxSpec] = &[
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::Policy,
-        description: "`- policy:` names an approval-broker policy in `[sop.approval].policies`; an absent policy fails closed rather than clearing on a single approval, while omission leaves the gate unpoliced.",
+        description: "`- policy:` names an approval-broker policy in `[sop.approval].policies`; the policy gates approval through required-group membership and quorum. An absent policy fails closed rather than clearing on a single approval, while omission leaves the gate unpoliced.",
     },
     SopStepSyntaxSpec {
         key: SopStepSyntaxKey::Edit,

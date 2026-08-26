@@ -166,17 +166,17 @@ Parser behavior:
 - `- with:` supplies the structured input for a capability step.
 - `- input:` attaches a JSON Schema-like input contract to the step boundary.
 - `- output:` attaches a JSON Schema-like output contract to the step boundary.
-- `- when:` guards an explicit `- next:` jump and is evaluated against accumulated completed-step outputs after the current step finishes; a matching guard takes the jump, while a false guard follows the linear successor or completes a terminal step.
-- `- next:` routes to an explicit successor step; ineligible routed steps are marked `skipped` and leave the run `pending` instead of dispatching.
+- `- when:` is evaluated against accumulated completed-step outputs after the current step finishes. A false guard bypasses `switch` and explicit `next`, taking the linear successor or completing when the step is terminal or has no successor. With a true or absent guard, a non-empty `switch` takes precedence over `next`; without a switch, an explicit `next` is used before terminal or linear routing.
+- `- next:` routes to an explicit successor only when the top-level `when` allows routing and no `switch` ports are declared; ineligible routed steps are marked `skipped` and leave the run `pending` instead of dispatching.
 - `- terminal: true` completes the run instead of advancing to another step; the final step also completes when it has no linear successor.
 - `- depends_on:` (or `- depends-on:`) lists prerequisite steps for a non-linear run.
-- `- switch:` defines ordered `name>condition>step` ports for multi-branch routing.
+- `- switch:` defines ordered `name>condition>step` ports for multi-branch routing. With a true or absent top-level `when`, the first matching port wins; an unmatched switch completes the run, and `next` plus the linear successor are ignored. A false top-level `when` bypasses switch evaluation.
 - `- on_failure:` (or `- on-failure:`) accepts `fail`, `retry:<count>`, or `goto:<step>` and is enforced for reported step failures and output-schema failures.
 - `- mode:` overrides the SOP execution mode for that step.
 - `- agent:` overrides the parent agent alias for that step.
 - `- call:` adds a JSON planned tool call to the step when the value parses as a planned call.
 - `- prompt:` sets the approval-gate notice template.
-- `- policy:` names an approval-broker policy in `[sop.approval].policies`; an absent policy fails closed rather than clearing on a single approval, while omission leaves the gate unpoliced.
+- `- policy:` names an approval-broker policy in `[sop.approval].policies`; the policy gates approval through required-group membership and quorum. An absent policy fails closed rather than clearing on a single approval, while omission leaves the gate unpoliced.
 - `- edit:` opts a checkpoint into editing the named field before resume.
 - Unrecognized sub-bullets and other non-empty continuation lines are appended to the step body.
 <!-- >>> end generated:sop-parser-behavior <<< -->
