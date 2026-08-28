@@ -71,6 +71,16 @@ function findInput(document: HappyDocument, text: string): HappyHTMLInputElement
   return input as HappyHTMLInputElement;
 }
 
+function findInputOrNull(
+  document: HappyDocument,
+  text: string,
+): HappyHTMLInputElement | null {
+  const label = Array.from(document.querySelectorAll("label")).find(
+    (candidate) => candidate.textContent?.includes(text),
+  );
+  return (label?.querySelector("input") as HappyHTMLInputElement | null) ?? null;
+}
+
 function setInputValue(input: HappyHTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(
     Object.getPrototypeOf(input),
@@ -207,12 +217,33 @@ test("ChannelAddForm preserves edited fields across real mode interactions", asy
 
     await act(async () => {
       findButton(domWindow.document, "Use existing").click();
+      await flushEffects();
+    });
+
+    assert.ok(
+      domWindow.document.querySelector('option[value="webhook.default"]'),
+      "expected existing-channel control after switching modes",
+    );
+    assert.equal(
+      findInputOrNull(domWindow.document, "Port"),
+      null,
+      "fresh channel inputs must be absent in existing mode",
+    );
+    assert.equal(
+      findInputOrNull(domWindow.document, "Secret"),
+      null,
+      "fresh channel inputs must be absent in existing mode",
+    );
+
+    await act(async () => {
       findButton(domWindow.document, "Create new").click();
       await flushEffects();
     });
 
-    assert.equal(port.value, "9123");
-    assert.equal(secret.value, "user-entered-secret");
+    const livePort = findInput(domWindow.document, "Port");
+    const liveSecret = findInput(domWindow.document, "Secret");
+    assert.equal(livePort.value, "9123");
+    assert.equal(liveSecret.value, "user-entered-secret");
     assert.equal(loadCount, 1, "mode changes must not reload channel descriptors");
   } finally {
     if (root) {
