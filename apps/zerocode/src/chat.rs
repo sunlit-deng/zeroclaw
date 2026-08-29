@@ -933,26 +933,40 @@ impl Chat {
             ChatPhase::Active(ref mut state) => state.take_next_dispatchable(),
             _ => None,
         };
-        let Some(msg) = next else { return };
+        let Some(QueuedMessage {
+            text, attachments, ..
+        }) = next
+        else {
+            return;
+        };
         let sid = match self.phase {
             ChatPhase::Active(ref state) => state.session_id.clone(),
-            _ => return,
+            _ => {
+                let _ = cleanup_attachment_temps(&attachments);
+                return;
+            }
         };
 
         let transport = self.rpc.transport();
-        let attachments_json = if msg.attachments.is_empty() {
+        let attachments_json = if attachments.is_empty() {
             Vec::new()
         } else {
-            match build_attachments_json(&msg.attachments, transport) {
+            match build_attachments_json(&attachments, transport) {
                 Ok(json) => json,
                 Err(e) => {
                     if let ChatPhase::Active(ref mut state) = self.phase {
+                        let cleanup_report = cleanup_attachment_temps(&attachments);
+                        state.surface_cleanup_report(cleanup_report);
                         state
                             .entries
                             .push(ChatEntry::SystemMessage(Arc::<str>::from(
                                 crate::i18n::t_args(
                                     "zc-queue-dispatch-failed",
-                                    &[("error", &e.to_string())],
+                                    // The anyhow context includes the local
+                                    // attachment path. Keep it out of the
+                                    // transcript; the cleanup notice already
+                                    // reports the bounded, actionable count.
+                                    &[("error", &e.root_cause().to_string())],
                                 ),
                             )));
                         state.mark_dirty_append();
@@ -963,16 +977,19 @@ impl Chat {
         };
 
         if let ChatPhase::Active(ref mut state) = self.phase {
-            let att_names: Vec<String> =
-                msg.attachments.iter().map(|a| a.filename.clone()).collect();
-            let text = if msg.text.is_empty() {
+            let att_names: Vec<String> = attachments.iter().map(|a| a.filename.clone()).collect();
+            let prompt = if text.is_empty() {
                 None
             } else {
-                Some(msg.text.clone())
+                Some(text.clone())
             };
-            state.push_user_message(text, att_names);
+            state.own_active_turn_attachments(attachments);
+            state.push_user_message(prompt, att_names);
+        } else {
+            let _ = cleanup_attachment_temps(&attachments);
+            return;
         }
-        self.spawn_prompt(sid, msg.text, attachments_json);
+        self.spawn_prompt(sid, text, attachments_json);
     }
 
     fn spawn_prompt(&self, sid: String, prompt: String, attachments_json: Vec<serde_json::Value>) {
@@ -5663,6 +5680,10 @@ pub struct ChatState {
     /// used to throttle re-fetches.
     pub git_branch_last_fetch: Option<Instant>,
     pub input_bar: InputBarState,
+    /// Attachments owned by the currently dispatched turn. Once an input-bar
+    /// submission leaves the composer, this is the sole owner until the turn
+    /// reaches a terminal outcome.
+    active_turn_attachments: Vec<PendingAttachment>,
     entries: Vec<ChatEntry>,
     streaming_text: String,
     streaming_thought: String,
@@ -5814,6 +5835,7 @@ impl ChatState {
             git_hash: None,
             git_branch_last_fetch: None,
             input_bar: InputBarState::with_shared_commands(commands),
+            active_turn_attachments: Vec::new(),
             entries: Vec::new(),
             streaming_text: String::new(),
             streaming_thought: String::new(),
@@ -6995,8 +7017,8 @@ impl ChatState {
         self.turn_in_flight = false;
         self.turn_status = TurnStatus::Idle;
         self.cancel_started_at = None;
-        self.input_bar.cleanup_temps();
-        let cleanup_report = self.input_bar.take_cleanup_report();
+        let mut cleanup_report = self.cleanup_active_turn_attachments();
+        cleanup_report.merge(self.input_bar.take_cleanup_report());
         self.surface_cleanup_report(cleanup_report);
         if !clean && !self.resume_override && !self.message_queue.is_empty() {
             self.queue_paused = true;
@@ -7037,6 +7059,15 @@ impl ChatState {
         self.turn_started_at = Instant::now();
     }
 
+    fn own_active_turn_attachments(&mut self, attachments: Vec<PendingAttachment>) {
+        debug_assert!(self.active_turn_attachments.is_empty());
+        self.active_turn_attachments = attachments;
+    }
+
+    fn cleanup_active_turn_attachments(&mut self) -> CleanupReport {
+        cleanup_attachment_temps(&std::mem::take(&mut self.active_turn_attachments))
+    }
+
     const QUEUE_CAP: usize = 32;
     const QUEUE_SIDEBAR_COLS_MIN: u16 = 24;
     const QUEUE_SIDEBAR_COLS_MAX: u16 = 80;
@@ -7055,10 +7086,14 @@ impl ChatState {
         attachments: Vec<PendingAttachment>,
     ) -> Result<(), String> {
         if text.trim().is_empty() && attachments.is_empty() {
+            let cleanup_report = cleanup_attachment_temps(&attachments);
+            self.surface_cleanup_report(cleanup_report);
             return Err(crate::i18n::t("zc-queue-empty"));
         }
         let pending = self.message_queue.len();
         if pending >= Self::QUEUE_CAP {
+            let cleanup_report = cleanup_attachment_temps(&attachments);
+            self.surface_cleanup_report(cleanup_report);
             return Err(crate::i18n::t_args(
                 "zc-queue-full",
                 &[("cap", &Self::QUEUE_CAP.to_string())],
@@ -7080,9 +7115,13 @@ impl ChatState {
         attachments: Vec<PendingAttachment>,
     ) -> Result<(), String> {
         if text.trim().is_empty() && attachments.is_empty() {
+            let cleanup_report = cleanup_attachment_temps(&attachments);
+            self.surface_cleanup_report(cleanup_report);
             return Err(crate::i18n::t("zc-queue-empty"));
         }
         if self.message_queue.len() >= Self::QUEUE_CAP {
+            let cleanup_report = cleanup_attachment_temps(&attachments);
+            self.surface_cleanup_report(cleanup_report);
             return Err(crate::i18n::t_args(
                 "zc-queue-full",
                 &[("cap", &Self::QUEUE_CAP.to_string())],
@@ -7539,6 +7578,7 @@ impl ChatState {
         // Rebuilding from freshly resolved settings also applies any Config-pane
         // edit made since this pane's `ChatState` was constructed.
         self.todo_tracker.reset_for_session(todo_settings);
+        cleanup_report.merge(self.cleanup_active_turn_attachments());
         cleanup_report.merge(self.clear_queue());
         self.surface_cleanup_report(cleanup_report);
     }
@@ -12046,6 +12086,144 @@ mod tests {
         }
     }
 
+    fn clipboard_att(path: &std::path::Path, filename: &str) -> PendingAttachment {
+        PendingAttachment {
+            path: path.to_path_buf(),
+            mime_type: "image/png".to_string(),
+            filename: filename.to_string(),
+            size_bytes: 1,
+            source: crate::attachment::AttachmentSource::Clipboard,
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatched_attachments_are_cleaned_on_completion_without_touching_user_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let clipboard_path = dir.path().join("clipboard.png");
+        std::fs::write(&clipboard_path, b"clipboard").expect("write clipboard temp");
+        let user_path = dir.path().join("user.png");
+        std::fs::write(&user_path, b"user").expect("write user file");
+
+        let (tx, _rx) = mpsc::channel::<String>(16);
+        let rpc = Arc::new(RpcOutbound::new(tx));
+        let client = Arc::new(RpcClient::with_rpc_transport(
+            rpc,
+            crate::client::Transport::Wss,
+        ));
+        let mut chat = Chat::new(client, PaneKind::Chat);
+        let mut active = state();
+        active
+            .enqueue_message(
+                "send attachments".to_string(),
+                vec![
+                    clipboard_att(&clipboard_path, "clipboard.png"),
+                    PendingAttachment {
+                        path: user_path.clone(),
+                        mime_type: "image/png".to_string(),
+                        filename: "user.png".to_string(),
+                        size_bytes: 4,
+                        source: crate::attachment::AttachmentSource::File,
+                    },
+                ],
+            )
+            .unwrap();
+        chat.phase = ChatPhase::Active(Box::new(active));
+
+        chat.pump_queue();
+
+        let ChatPhase::Active(state) = &mut chat.phase else {
+            panic!("expected active chat");
+        };
+        assert!(state.turn_in_flight);
+        assert_eq!(state.active_turn_attachments.len(), 2);
+        assert!(clipboard_path.exists());
+        state.commit_turn(String::new(), true);
+
+        assert!(
+            !clipboard_path.exists(),
+            "active clipboard temp must be removed"
+        );
+        assert!(user_path.exists(), "user-selected file must be preserved");
+        assert!(state.active_turn_attachments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn serialization_failure_cleans_dispatched_clipboard_temp_and_reports_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let clipboard_path = dir.path().join("clipboard-temp");
+        std::fs::create_dir(&clipboard_path).expect("create forced-failure path");
+        let user_path = dir.path().join("user.png");
+        std::fs::write(&user_path, b"user").expect("write user file");
+
+        let (tx, _rx) = mpsc::channel::<String>(16);
+        let rpc = Arc::new(RpcOutbound::new(tx));
+        let client = Arc::new(RpcClient::with_rpc_transport(
+            rpc,
+            crate::client::Transport::Wss,
+        ));
+        let mut chat = Chat::new(client, PaneKind::Chat);
+        let mut active = state();
+        active
+            .enqueue_message(
+                "cannot serialize".to_string(),
+                vec![
+                    clipboard_att(&clipboard_path, "clipboard.png"),
+                    PendingAttachment {
+                        path: user_path.clone(),
+                        mime_type: "image/png".to_string(),
+                        filename: "user.png".to_string(),
+                        size_bytes: 4,
+                        source: crate::attachment::AttachmentSource::File,
+                    },
+                ],
+            )
+            .unwrap();
+        chat.phase = ChatPhase::Active(Box::new(active));
+
+        chat.pump_queue();
+
+        let ChatPhase::Active(state) = &chat.phase else {
+            panic!("expected active chat");
+        };
+        assert!(!state.turn_in_flight);
+        assert!(state.active_turn_attachments.is_empty());
+        assert!(
+            clipboard_path.exists(),
+            "failed cleanup must leave the path"
+        );
+        assert!(user_path.exists(), "user-selected file must be preserved");
+        assert!(
+            state
+                .info_message
+                .as_ref()
+                .is_some_and(|message| message.text.contains("1 temporary file"))
+        );
+        let clipboard_path = clipboard_path.to_string_lossy();
+        assert!(state.entries.iter().all(|entry| match entry {
+            ChatEntry::SystemMessage(text) => !text.contains(clipboard_path.as_ref()),
+            _ => true,
+        }));
+    }
+
+    #[test]
+    fn completion_does_not_delete_an_unsent_composer_attachment() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let clipboard_path = dir.path().join("composer.png");
+        std::fs::write(&clipboard_path, b"clipboard").expect("write clipboard temp");
+
+        let mut active = state();
+        active.input_bar.load_for_edit(
+            String::new(),
+            vec![clipboard_att(&clipboard_path, "composer.png")],
+        );
+        active.turn_in_flight = true;
+
+        active.commit_turn(String::new(), false);
+
+        assert!(clipboard_path.exists());
+        assert_eq!(active.input_bar.pending_attachments().len(), 1);
+    }
+
     #[test]
     fn enqueue_dispatches_immediately_when_idle() {
         let mut s = state();
@@ -13101,9 +13279,15 @@ mod tests {
     }
 
     fn test_chat() -> (Chat, mpsc::Receiver<String>) {
+        test_chat_with_transport(crate::client::Transport::Local)
+    }
+
+    fn test_chat_with_transport(
+        transport: crate::client::Transport,
+    ) -> (Chat, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel::<String>(16);
         let rpc = Arc::new(RpcOutbound::new(tx));
-        let client = Arc::new(RpcClient::with_rpc(rpc));
+        let client = Arc::new(RpcClient::with_rpc_transport(rpc, transport));
         (Chat::new(client, PaneKind::Chat), rx)
     }
 
