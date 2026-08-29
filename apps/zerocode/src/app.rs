@@ -125,14 +125,27 @@ impl SgrMouseEventDecoder {
     }
 
     fn read_ready(&mut self) -> Result<Option<Event>> {
+        self.read_ready_with(|| {
+            if event::poll(Duration::ZERO)? {
+                Ok(Some(event::read()?))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    fn read_ready_with<F>(&mut self, mut read_event: F) -> Result<Option<Event>>
+    where
+        F: FnMut() -> Result<Option<Event>>,
+    {
         loop {
             if let Some(event) = self.next() {
                 return Ok(Some(event));
             }
-            if !event::poll(Duration::ZERO)? {
+            let Some(event) = read_event()? else {
                 return Ok(None);
-            }
-            self.feed(event::read()?);
+            };
+            self.feed(event);
         }
     }
 
@@ -210,11 +223,15 @@ fn key_event_char(event: &Event) -> Option<char> {
 fn parse_sgr_mouse(chars: &[char]) -> Option<MouseEvent> {
     let final_char = *chars.last()?;
     let payload: String = chars[2..chars.len().checked_sub(1)?].iter().collect();
-    let mut fields = payload.split(';');
-    let cb = fields.next()?.parse::<u8>().ok()?;
-    let column = fields.next()?.parse::<u16>().ok()?;
-    let row = fields.next()?.parse::<u16>().ok()?;
-    if fields.next().is_some_and(|field| !field.is_empty()) || column == 0 || row == 0 {
+    let payload = payload.strip_suffix(';').unwrap_or(payload.as_str());
+    let fields: Vec<_> = payload.split(';').collect();
+    if fields.len() != 3 || fields.iter().any(|field| field.is_empty()) {
+        return None;
+    }
+    let cb = fields[0].parse::<u8>().ok()?;
+    let column = fields[1].parse::<u16>().ok()?;
+    let row = fields[2].parse::<u16>().ok()?;
+    if column == 0 || row == 0 {
         return None;
     }
 
@@ -2054,12 +2071,41 @@ mod tests {
     use std::collections::VecDeque;
 
     fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> Event {
+        mouse_event_with_modifiers(kind, column, row, KeyModifiers::NONE)
+    }
+
+    fn mouse_event_with_modifiers(
+        kind: MouseEventKind,
+        column: u16,
+        row: u16,
+        modifiers: KeyModifiers,
+    ) -> Event {
         Event::Mouse(crossterm::event::MouseEvent {
             kind,
             column,
             row,
-            modifiers: KeyModifiers::NONE,
+            modifiers,
         })
+    }
+
+    fn key_event(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn decode_sgr_sequence(sequence: &str) -> Vec<Event> {
+        let mut decoder = SgrMouseEventDecoder::default();
+        decoder.feed(key_event(KeyCode::Esc));
+        for character in sequence.chars() {
+            decoder.feed(key_event(KeyCode::Char(character)));
+        }
+        std::iter::from_fn(|| decoder.next()).collect()
+    }
+
+    fn split_sgr_events(sequence: &str) -> VecDeque<Event> {
+        sequence
+            .chars()
+            .map(|character| key_event(KeyCode::Char(character)))
+            .collect()
     }
 
     #[test]
@@ -2201,19 +2247,117 @@ mod tests {
     }
 
     #[test]
-    fn split_sgr_mouse_sequence_becomes_one_mouse_event() {
-        let mut decoder = SgrMouseEventDecoder::default();
-        decoder.feed(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        for character in "[<64;32;17M".chars() {
-            decoder.feed(Event::Key(KeyEvent::new(
-                KeyCode::Char(character),
-                KeyModifiers::NONE,
-            )));
+    fn split_sgr_mouse_decoder_decodes_vertical_wheel_events() {
+        for (sequence, kind) in [
+            ("[<64;32;17M", MouseEventKind::ScrollUp),
+            ("[<65;32;17M", MouseEventKind::ScrollDown),
+        ] {
+            assert_eq!(
+                decode_sgr_sequence(sequence),
+                vec![mouse_event(kind, 31, 16)]
+            );
         }
+    }
 
-        let decoded: Vec<Event> = std::iter::from_fn(|| decoder.next()).collect();
+    #[test]
+    fn split_sgr_mouse_decoder_decodes_click_and_release_events() {
+        for (sequence, kind) in [
+            ("[<0;3;4M", MouseEventKind::Down(MouseButton::Left)),
+            ("[<1;3;4M", MouseEventKind::Down(MouseButton::Middle)),
+            ("[<2;3;4M", MouseEventKind::Down(MouseButton::Right)),
+            ("[<3;3;4M", MouseEventKind::Up(MouseButton::Left)),
+            ("[<0;3;4m", MouseEventKind::Up(MouseButton::Left)),
+        ] {
+            assert_eq!(decode_sgr_sequence(sequence), vec![mouse_event(kind, 2, 3)]);
+        }
+    }
 
-        assert_eq!(decoded, vec![mouse_event(MouseEventKind::ScrollUp, 31, 16)]);
+    #[test]
+    fn split_sgr_mouse_decoder_decodes_drag_and_movement_events() {
+        for (sequence, kind) in [
+            ("[<32;5;6M", MouseEventKind::Drag(MouseButton::Left)),
+            ("[<33;5;6M", MouseEventKind::Drag(MouseButton::Middle)),
+            ("[<34;5;6M", MouseEventKind::Drag(MouseButton::Right)),
+            ("[<35;5;6M", MouseEventKind::Moved),
+        ] {
+            assert_eq!(decode_sgr_sequence(sequence), vec![mouse_event(kind, 4, 5)]);
+        }
+    }
+
+    #[test]
+    fn split_sgr_mouse_decoder_decodes_horizontal_wheel_events() {
+        for (sequence, kind) in [
+            ("[<66;10;11M", MouseEventKind::ScrollLeft),
+            ("[<67;10;11M", MouseEventKind::ScrollRight),
+        ] {
+            assert_eq!(
+                decode_sgr_sequence(sequence),
+                vec![mouse_event(kind, 9, 10)]
+            );
+        }
+    }
+
+    #[test]
+    fn split_sgr_mouse_decoder_preserves_modifiers_and_coordinates() {
+        assert_eq!(
+            decode_sgr_sequence("[<93;1;2M"),
+            vec![mouse_event_with_modifiers(
+                MouseEventKind::ScrollDown,
+                0,
+                1,
+                KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL,
+            )]
+        );
+    }
+
+    #[test]
+    fn split_sgr_mouse_decoder_accepts_optional_delimiter_and_lowercase_release() {
+        assert_eq!(
+            decode_sgr_sequence("[<64;32;17;M"),
+            vec![mouse_event(MouseEventKind::ScrollUp, 31, 16)]
+        );
+        assert_eq!(
+            decode_sgr_sequence("[<0;32;17;m"),
+            vec![mouse_event(MouseEventKind::Up(MouseButton::Left), 31, 16)]
+        );
+    }
+
+    #[test]
+    fn split_sgr_mouse_decoder_rejects_multiple_empty_trailing_fields() {
+        let sequence = "[<64;32;17;;M";
+        let expected: Vec<Event> = std::iter::once(key_event(KeyCode::Esc))
+            .chain(
+                sequence
+                    .chars()
+                    .map(|character| key_event(KeyCode::Char(character))),
+            )
+            .collect();
+
+        assert_eq!(decode_sgr_sequence(sequence), expected);
+    }
+
+    #[test]
+    fn drag_read_ahead_reassembles_split_sgr_drag_without_leaking_escape() {
+        let first_drag = mouse_event(MouseEventKind::Drag(MouseButton::Left), 4, 5);
+        let latest_drag = mouse_event(MouseEventKind::Drag(MouseButton::Left), 7, 8);
+        let following_key = key_event(KeyCode::Char('x'));
+        let mut queued = VecDeque::from([key_event(KeyCode::Esc)]);
+        queued.extend(split_sgr_events("[<32;8;9M"));
+        queued.push_back(following_key.clone());
+        let mut decoder = SgrMouseEventDecoder::default();
+
+        let (current, pending) = coalesce_mouse_drag(first_drag, || {
+            decoder.read_ready_with(|| Ok(queued.pop_front()))
+        })
+        .expect("reassemble SGR drag during read-ahead");
+
+        assert_eq!(current, latest_drag);
+        assert_eq!(pending, Some(following_key.clone()));
+        assert!(decoder.candidate.is_empty());
+        assert!(queued.is_empty());
+
+        decoder.push_front(pending.expect("preserve following input"));
+        assert_eq!(decoder.next(), Some(following_key));
     }
 
     #[test]
