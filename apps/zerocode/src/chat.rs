@@ -16,7 +16,9 @@ use ratatui::{
 };
 use tokio::sync::{broadcast, mpsc};
 
-use crate::attachment::{PendingAttachment, build_attachments_json, cleanup_attachment_temps};
+use crate::attachment::{
+    CleanupReport, PendingAttachment, build_attachments_json, cleanup_attachment_temps,
+};
 use crate::client::{
     ApprovalDecision, RpcClient, RpcNotification, SessionEntry, SessionUpdate, TurnEndOutcome,
     method, parse_session_update,
@@ -37,6 +39,16 @@ const APPROVAL_OVERLAY_HEIGHT: u16 = 7;
 const GIT_BRANCH_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const CANCEL_WATCHDOG: Duration = Duration::from_secs(30);
 const COPY_FEEDBACK_TTL: Duration = Duration::from_secs(1);
+
+fn append_cleanup_notice(mut message: String, cleanup: Option<String>) -> String {
+    if let Some(cleanup) = cleanup {
+        if !message.is_empty() {
+            message.push_str("; ");
+        }
+        message.push_str(&cleanup);
+    }
+    message
+}
 
 // ── Chat pane (tab mode) ─────────────────────────────────────────
 
@@ -1548,7 +1560,8 @@ impl Chat {
                     return false;
                 }
                 InputBarAction::StatusMessage(msg) => {
-                    state.set_info_notice(msg);
+                    let cleanup_notice = state.input_bar.take_cleanup_report().notice();
+                    state.set_info_notice(append_cleanup_notice(msg, cleanup_notice));
                     return false;
                 }
                 InputBarAction::ToggleThinking => {
@@ -1574,7 +1587,10 @@ impl Chat {
                     return false;
                 }
                 InputBarAction::ClearQueue(idx) => {
-                    let notice = state.clear_queue_cmd(idx);
+                    let notice = append_cleanup_notice(
+                        state.clear_queue_cmd(idx),
+                        state.input_bar.take_cleanup_report().notice(),
+                    );
                     state.set_info_notice(notice);
                     return false;
                 }
@@ -1632,7 +1648,12 @@ impl Chat {
                     Self::open_provider_picker(&rpc, state).await;
                     return false;
                 }
-                InputBarAction::Consumed => return false,
+                InputBarAction::Consumed => {
+                    if let Some(message) = state.input_bar.take_cleanup_report().notice() {
+                        state.set_info_notice(message);
+                    }
+                    return false;
+                }
                 InputBarAction::NotHandled => { /* fall through to chat-specific keys */ }
             }
         }
@@ -2337,9 +2358,14 @@ impl Chat {
 
         if let ChatPhase::Active(ref mut state) = self.phase {
             // The file explorer renders above every parent overlay.
-            if state.input_bar.has_file_explorer() && state.input_bar.handle_mouse(mouse) {
-                state.clear_mouse_highlight();
-                return;
+            if state.input_bar.has_file_explorer() {
+                let consumed = state.input_bar.handle_mouse(mouse);
+                let cleanup_report = state.input_bar.take_cleanup_report();
+                state.surface_cleanup_report(cleanup_report);
+                if consumed {
+                    state.clear_mouse_highlight();
+                    return;
+                }
             }
 
             if state.model_picker.is_open() {
@@ -2426,7 +2452,10 @@ impl Chat {
                 }
             }
 
-            if state.input_bar.handle_mouse(mouse) {
+            let input_bar_consumed = state.input_bar.handle_mouse(mouse);
+            let cleanup_report = state.input_bar.take_cleanup_report();
+            state.surface_cleanup_report(cleanup_report);
+            if input_bar_consumed {
                 state.clear_mouse_highlight();
                 return;
             }
@@ -2691,7 +2720,10 @@ impl Chat {
         }
         let action = state.input_bar.handle_paste(text);
         if let InputBarAction::StatusMessage(msg) = action {
-            state.set_info_notice(msg);
+            let cleanup_notice = state.input_bar.take_cleanup_report().notice();
+            state.set_info_notice(append_cleanup_notice(msg, cleanup_notice));
+        } else if let Some(message) = state.input_bar.take_cleanup_report().notice() {
+            state.set_info_notice(message);
         }
     }
 
@@ -2752,6 +2784,8 @@ impl Chat {
     pub(crate) fn clear_input(&mut self) {
         if let ChatPhase::Active(s) = &mut self.phase {
             s.input_bar.reset();
+            let cleanup_report = s.input_bar.take_cleanup_report();
+            s.surface_cleanup_report(cleanup_report);
             s.mark_dirty_full();
         }
     }
@@ -5869,9 +5903,12 @@ impl ChatState {
 
         self.clear_mouse_highlight();
         let action = self.input_bar.handle_key(key);
+        let cleanup_notice = self.input_bar.take_cleanup_report().notice();
         // Explorer confirmation can reject an attachment (for example a file
         // over the size limit). Preserve that feedback instead of swallowing it.
         if let InputBarAction::StatusMessage(message) = action {
+            self.set_info_notice(append_cleanup_notice(message, cleanup_notice));
+        } else if let Some(message) = cleanup_notice {
             self.set_info_notice(message);
         }
         self.mark_dirty_full();
@@ -6959,6 +6996,8 @@ impl ChatState {
         self.turn_status = TurnStatus::Idle;
         self.cancel_started_at = None;
         self.input_bar.cleanup_temps();
+        let cleanup_report = self.input_bar.take_cleanup_report();
+        self.surface_cleanup_report(cleanup_report);
         if !clean && !self.resume_override && !self.message_queue.is_empty() {
             self.queue_paused = true;
         }
@@ -7131,6 +7170,12 @@ impl ChatState {
     /// and consistent rendering with model-switch notes.
     pub fn set_info_notice(&mut self, msg: String) {
         self.info_message = Some(crate::widgets::InfoMessage::note(msg));
+    }
+
+    fn surface_cleanup_report(&mut self, report: CleanupReport) {
+        if let Some(message) = report.notice() {
+            self.set_info_notice(message);
+        }
     }
 
     fn set_overlay_copy_feedback(&mut self, anchor: Rect) {
@@ -7316,7 +7361,8 @@ impl ChatState {
             return false;
         };
         if let Some(message) = self.message_queue.remove(position) {
-            cleanup_attachment_temps(&message.attachments);
+            let cleanup_report = cleanup_attachment_temps(&message.attachments);
+            self.surface_cleanup_report(cleanup_report);
         }
         let ids = self.editable_ids();
         self.queue_sel = ids.get(position.min(ids.len().saturating_sub(1))).copied();
@@ -7358,9 +7404,12 @@ impl ChatState {
                 if count == 0 {
                     return crate::i18n::t("zc-queue-clear-empty");
                 }
-                self.clear_queue();
+                let cleanup_report = self.clear_queue();
                 self.mark_dirty_full();
-                crate::i18n::t_args("zc-queue-cleared-all", &[("count", &count.to_string())])
+                append_cleanup_notice(
+                    crate::i18n::t_args("zc-queue-cleared-all", &[("count", &count.to_string())]),
+                    cleanup_report.notice(),
+                )
             }
             Some(n) => {
                 if count == 0 {
@@ -7373,27 +7422,33 @@ impl ChatState {
                     );
                 }
                 let pos = n - 1;
+                let mut cleanup_report = CleanupReport::default();
                 if let Some(msg) = self.message_queue.remove(pos) {
-                    cleanup_attachment_temps(&msg.attachments);
+                    cleanup_report = cleanup_attachment_temps(&msg.attachments);
                     if self.queue_sel == Some(msg.id) {
                         let ids = self.editable_ids();
                         self.queue_sel = ids.get(pos.min(ids.len().saturating_sub(1))).copied();
                     }
                 }
                 self.mark_dirty_full();
-                crate::i18n::t_args("zc-queue-cleared-one", &[("index", &n.to_string())])
+                append_cleanup_notice(
+                    crate::i18n::t_args("zc-queue-cleared-one", &[("index", &n.to_string())]),
+                    cleanup_report.notice(),
+                )
             }
         }
     }
 
-    fn clear_queue(&mut self) {
+    fn clear_queue(&mut self) -> CleanupReport {
+        let mut cleanup_report = CleanupReport::default();
         for msg in self.message_queue.drain(..) {
-            cleanup_attachment_temps(&msg.attachments);
+            cleanup_report.merge(cleanup_attachment_temps(&msg.attachments));
         }
         self.next_queue_id = 0;
         self.queue_paused = false;
         self.resume_override = false;
         self.queue_sel = None;
+        cleanup_report
     }
 
     fn load_history(
@@ -7443,6 +7498,7 @@ impl ChatState {
         self.model_provider_ref = None;
         self.model = None;
         self.input_bar.reset();
+        let mut cleanup_report = self.input_bar.take_cleanup_report();
         self.entries.clear();
         self.streaming_text.clear();
         self.streaming_thought.clear();
@@ -7483,7 +7539,8 @@ impl ChatState {
         // Rebuilding from freshly resolved settings also applies any Config-pane
         // edit made since this pane's `ChatState` was constructed.
         self.todo_tracker.reset_for_session(todo_settings);
-        self.clear_queue();
+        cleanup_report.merge(self.clear_queue());
+        self.surface_cleanup_report(cleanup_report);
     }
 }
 
