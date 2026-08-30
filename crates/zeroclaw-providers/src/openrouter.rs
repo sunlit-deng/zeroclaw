@@ -552,14 +552,11 @@ impl OpenRouterModelProvider {
     }
 
     fn streaming_http_client_with_idle_timeout(&self, idle_timeout: Duration) -> Client {
-        let builder = Client::builder()
-            .connect_timeout(Duration::from_secs(OPENROUTER_CONNECT_TIMEOUT_SECS))
-            .read_timeout(idle_timeout);
-        let builder = zeroclaw_config::schema::apply_runtime_proxy_to_builder(
-            builder,
+        zeroclaw_config::schema::build_runtime_proxy_client_with_read_timeout(
             "model_provider.openrouter",
-        );
-        builder.build().unwrap_or_else(|_| Client::new())
+            idle_timeout.as_secs(),
+            OPENROUTER_CONNECT_TIMEOUT_SECS,
+        )
     }
 }
 
