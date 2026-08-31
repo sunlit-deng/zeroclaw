@@ -58,6 +58,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  history-guard:
+    name: Common Ancestor
+    needs: [fmt]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Reject unrelated PR history
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! common_ancestor="$(git merge-base origin/master HEAD)" || [[ -z "$common_ancestor" ]]; then
+            echo "::error::This PR has no common ancestor with origin/master; refusing a grafted second root."
+            exit 1
+          fi
+          echo "Common ancestor with origin/master: $common_ancestor"
+
   repo-structure:
     name: Repository Structure
     needs: [fmt]
@@ -1063,7 +1082,7 @@ jobs:
   gate:
     name: CI Required Gate
     if: always()
-    needs: [fmt, repo-structure, relay-container-smoke-changes, relay-container-smoke, path-changes, lint, windows-clippy-tools-changes, windows-clippy-tools, build, check, check-plugin-backends, msrv, check-32bit, bench, test, parallel-runtime-test-changes, parallel-runtime-test, test-landlock, security, nix-eval, nix-hash-drift, docs-style, installer-drift, zerocode-rpc-boundary, web-permission-tests]
+    needs: [fmt, history-guard, repo-structure, relay-container-smoke-changes, relay-container-smoke, path-changes, lint, windows-clippy-tools-changes, windows-clippy-tools, build, check, check-plugin-backends, msrv, check-32bit, bench, test, parallel-runtime-test-changes, parallel-runtime-test, test-landlock, security, nix-eval, nix-hash-drift, docs-style, installer-drift, zerocode-rpc-boundary, web-permission-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Check results
