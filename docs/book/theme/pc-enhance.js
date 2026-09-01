@@ -550,14 +550,22 @@
         host.setAttribute('role', 'button');
         host.setAttribute('aria-label', localeText('expandDiagram', 'Open diagram zoom'));
         host.setAttribute('aria-keyshortcuts', 'Enter Space');
+        // Mermaid can replace the rendered SVG while the page is settling.
+        // Resolve the current child at activation time so the dialog moves the
+        // live node rather than a stale render captured during wiring.
+        function openCurrentDiagram() {
+          const currentSvg =
+            host.matches('svg') ? host : host.querySelector('svg');
+          if (currentSvg) openModal(currentSvg, host);
+        }
         host.addEventListener('click', function (e) {
           if (e.target.closest('a')) return;
-          openModal(svg, host);
+          openCurrentDiagram();
         });
         host.addEventListener('keydown', function (e) {
           if (e.key !== 'Enter' && e.key !== ' ') return;
           e.preventDefault();
-          openModal(svg, host);
+          openCurrentDiagram();
         });
       });
     }
