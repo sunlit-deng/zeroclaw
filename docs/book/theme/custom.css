@@ -691,8 +691,8 @@ body,
 /* ---------------------------------------------------------------------------
    B1.1. Reader controls
    The scale is set on the root by pc-enhance.js and persisted in localStorage.
-   Keep the menu controls themselves at the normal UI size while the content,
-   sidebar, and page TOC follow the reader's chosen scale. */
+   Keep the controls readable while making them follow the reader's chosen
+   scale alongside the content, sidebar, and page TOC. */
 #mdbook-content main {
   font-size: calc(1.6rem * var(--pc-reader-scale, 1));
 }
@@ -709,7 +709,7 @@ body,
 
 .pc-reader-toggle {
   font-family: var(--pc-font-ui);
-  font-size: 0.78rem;
+  font-size: calc(1rem * var(--pc-reader-scale, 1));
   font-weight: 700;
   letter-spacing: -0.08em;
   padding-inline: 0.6rem;
@@ -727,6 +727,7 @@ body,
   border: 1px solid var(--pc-border-strong);
   border-radius: var(--pc-radius);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: calc(1.1rem * var(--pc-reader-scale, 1));
 }
 
 .pc-reader-popup[hidden] {
@@ -736,14 +737,14 @@ body,
 .pc-reader-popup-title {
   margin-bottom: 0.65rem;
   color: var(--pc-text-primary);
-  font-size: 0.82rem;
+  font-size: 1em;
   font-weight: 600;
 }
 
 .pc-reader-scale-label {
   margin-bottom: 0.35rem;
   color: var(--pc-text-muted);
-  font-size: 0.72rem;
+  font-size: 0.85em;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -762,6 +763,7 @@ body,
   border: 1px solid var(--pc-border);
   border-radius: 0.45rem;
   cursor: pointer;
+  font: inherit;
   transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
@@ -787,7 +789,7 @@ body,
   min-width: 3.1rem;
   color: var(--pc-text-primary);
   font-family: var(--pc-font-mono);
-  font-size: 0.78rem;
+  font-size: 0.95em;
   text-align: center;
 }
 
@@ -795,7 +797,6 @@ body,
   width: 100%;
   margin-top: 0.65rem;
   padding: 0.35rem 0.55rem;
-  font-size: 0.78rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -810,7 +811,7 @@ body,
   width: 15rem;
   max-height: calc(100vh - 8rem);
   overflow-y: auto;
-  font-size: 0.82rem;
+  font-size: calc(1rem * var(--pc-reader-scale, 1));
   padding-left: 0.9rem;
   border-left: 1px solid var(--pc-border);
   display: none;
@@ -839,7 +840,7 @@ body,
     border-radius: 0.55rem;
     cursor: pointer;
     font: inherit;
-    font-size: 0.88em;
+    font-size: calc(1rem * var(--pc-reader-scale, 1));
     text-align: start;
   }
 
@@ -857,7 +858,7 @@ body,
     padding: 0.75rem 0.9rem;
     border: 1px solid var(--pc-border);
     border-radius: var(--pc-radius);
-    font-size: calc(0.82rem * var(--pc-reader-scale, 1));
+    font-size: calc(1rem * var(--pc-reader-scale, 1));
   }
 
   .pc-page-toc.pc-toc-open {
@@ -872,7 +873,7 @@ body,
 .pc-toc-title {
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  font-size: 0.68rem;
+  font-size: 0.9em;
   font-weight: 600;
   color: var(--pc-text-faint);
   margin-bottom: 0.6rem;
@@ -948,20 +949,22 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(96vw, 90rem);
-  height: min(92vh, 60rem);
+  width: calc(100vw - 2rem);
+  height: calc(100vh - 2rem);
+  box-sizing: border-box;
   padding: 1rem;
   color: var(--pc-text-primary);
   background: var(--pc-bg-elevated);
   border: 1px solid var(--pc-border-strong);
   border-radius: var(--pc-radius-lg);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  font-size: calc(1rem * var(--pc-reader-scale, 1));
 }
 
 .pc-diagram-modal-title {
   margin: 0 3rem 0.65rem 0.25rem;
   color: var(--pc-text-primary);
-  font-size: 1rem;
+  font-size: 1.25em;
   font-weight: 600;
 }
 
@@ -976,7 +979,8 @@ body,
   border: 1px solid var(--pc-border);
   border-radius: 0.5rem;
   cursor: pointer;
-  font-size: 1.5rem;
+  font: inherit;
+  font-size: 1.75em;
   line-height: 1;
 }
 
@@ -1039,6 +1043,8 @@ body,
   border: 1px solid var(--pc-border);
   border-radius: 0.45rem;
   cursor: pointer;
+  font: inherit;
+  font-size: 1em;
   font-weight: 600;
 }
 
@@ -1050,14 +1056,14 @@ body,
 .pc-diagram-reset {
   margin-left: 0.35rem;
   font-family: var(--pc-font-mono);
-  font-size: 0.75rem;
+  font-size: 0.9em;
 }
 
 .pc-diagram-zoom-value {
   min-width: 3.4rem;
   color: var(--pc-text-primary);
   font-family: var(--pc-font-mono);
-  font-size: 0.78rem;
+  font-size: 0.95em;
   text-align: center;
 }
 
@@ -1072,7 +1078,7 @@ body,
   }
 
   .pc-diagram-surface {
-    width: 100vw;
+    width: 100%;
     height: 96vh;
     padding: 0.65rem;
   }

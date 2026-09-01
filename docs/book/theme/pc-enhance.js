@@ -353,6 +353,7 @@
     if (!main || document.getElementById('pc-diagram-modal')) return;
 
     let activeTrigger = null;
+    let activeDiagram = null;
     let zoom = 1;
     let panX = 0;
     let panY = 0;
@@ -438,6 +439,25 @@
     function closeModal() {
       modal.hidden = true;
       document.documentElement.classList.remove('pc-diagram-modal-open');
+
+      if (activeDiagram) {
+        const {
+          svg,
+          placeholder,
+          originalTransform,
+          originalAriaHidden,
+          originalTabIndex,
+        } = activeDiagram;
+        svg.style.transform = originalTransform;
+        if (originalAriaHidden === null) svg.removeAttribute('aria-hidden');
+        else svg.setAttribute('aria-hidden', originalAriaHidden);
+        if (originalTabIndex === null) svg.removeAttribute('tabindex');
+        else svg.setAttribute('tabindex', originalTabIndex);
+        if (placeholder.isConnected) placeholder.replaceWith(svg);
+        else stage.replaceChildren();
+        activeDiagram = null;
+      }
+
       stage.replaceChildren();
       if (activeTrigger) activeTrigger.focus();
       activeTrigger = null;
@@ -448,10 +468,30 @@
       zoom = 1;
       panX = 0;
       panY = 0;
-      const clone = svg.cloneNode(true);
-      clone.setAttribute('aria-hidden', 'true');
-      clone.removeAttribute('tabindex');
-      stage.replaceChildren(clone);
+      // Keep Mermaid's original SVG node so its generated IDs remain unique.
+      // A sized placeholder preserves the page layout while the node is in the
+      // dialog, then the same node is restored when the dialog closes.
+      const placeholder = document.createElement('span');
+      placeholder.className = 'pc-diagram-placeholder';
+      placeholder.setAttribute('aria-hidden', 'true');
+      const rect = svg.getBoundingClientRect();
+      const computed = window.getComputedStyle(svg);
+      placeholder.style.display = computed.display === 'inline' ? 'inline-block' : computed.display;
+      placeholder.style.width = rect.width + 'px';
+      placeholder.style.height = rect.height + 'px';
+      placeholder.style.margin = computed.margin;
+      placeholder.style.verticalAlign = computed.verticalAlign;
+      activeDiagram = {
+        svg: svg,
+        placeholder: placeholder,
+        originalTransform: svg.style.transform,
+        originalAriaHidden: svg.getAttribute('aria-hidden'),
+        originalTabIndex: svg.getAttribute('tabindex'),
+      };
+      svg.replaceWith(placeholder);
+      svg.setAttribute('aria-hidden', 'true');
+      svg.removeAttribute('tabindex');
+      stage.replaceChildren(svg);
       modal.hidden = false;
       document.documentElement.classList.add('pc-diagram-modal-open');
       applyTransform();
