@@ -395,7 +395,6 @@
           - "src/peripherals/mod.rs"
           - "crates/zeroclaw-hardware/**"
           - "crates/zeroclaw-api/src/peripherals_traits.rs"
-          - "crates/zeroclaw-runtime/src/firmware/**"
           - "firmware/**"
 
 "web":

@@ -121,7 +121,7 @@ Applied automatically by `pr-path-labeler.yml`. Globs live in `.github/labeler.y
 | `runtime` | `src/runtime/**`, `crates/zeroclaw-runtime/src/**` |
 | `quickstart` | `crates/zeroclaw-runtime/src/quickstart/**`, `crates/zeroclaw-gateway/src/api_quickstart.rs`, `apps/zerocode/src/quickstart_pane.rs`, `web/src/pages/quickstart/**` |
 | `desktop` | `apps/tauri/**` |
-| `hardware` | `src/hardware/**`, `src/peripherals/mod.rs`, `crates/zeroclaw-hardware/**`, `crates/zeroclaw-api/src/peripherals_traits.rs`, `crates/zeroclaw-runtime/src/firmware/**`, `firmware/**` |
+| `hardware` | `src/hardware/**`, `src/peripherals/mod.rs`, `crates/zeroclaw-hardware/**`, `crates/zeroclaw-api/src/peripherals_traits.rs`, `firmware/**` |
 | `web` | `web/**` |
 | `zerocode` | `apps/zerocode/**` |
 | `provider` | `src/providers/**`, `crates/zeroclaw-providers/src/**` |

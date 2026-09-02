@@ -21,6 +21,7 @@ REPO_ROOT="$repo_root" NODE_PATH="$tmp_dir/node_modules" \
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const yaml = require('js-yaml');
 const { Minimatch } = require('minimatch');
 
@@ -29,6 +30,11 @@ const labelerPath = path.join(root, '.github', 'labeler.yml');
 const workflowPath = path.join(root, '.github', 'workflows', 'pr-path-labeler.yml');
 const config = yaml.load(fs.readFileSync(labelerPath, 'utf8'));
 const workflow = fs.readFileSync(workflowPath, 'utf8');
+const trackedFiles = new Set(
+  execFileSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean),
+);
 
 assert.match(workflow, new RegExp(`${process.env.PATH_LABELER_ACTION_REF} \\# ${process.env.PATH_LABELER_ACTION_VERSION}`));
 
@@ -45,11 +51,10 @@ function matchesLabel(label, files) {
 
 const positives = [
   ['cli', 'src/memory/cli.rs'],
-  ['cli', 'src/commands/memory.rs'],
+  ['cli', 'src/commands/update.rs'],
   ['hardware', 'src/peripherals/mod.rs'],
   ['hardware', 'crates/zeroclaw-api/src/peripherals_traits.rs'],
-  ['hardware', 'crates/zeroclaw-runtime/src/firmware/transport.rs'],
-  ['hardware', 'firmware/src/main.rs'],
+  ['hardware', 'firmware/esp32-ui/src/main.rs'],
 ];
 const negatives = [
   ['cli', 'src/memory/mod.rs'],
@@ -61,6 +66,7 @@ const negatives = [
 ];
 
 for (const [label, file] of positives) {
+  assert.equal(trackedFiles.has(file), true, `${file} must be a tracked repository path`);
   assert.equal(matchesLabel(label, [file]), true, `${label} should match ${file}`);
 }
 for (const [label, file] of negatives) {
