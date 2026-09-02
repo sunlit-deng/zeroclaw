@@ -67,15 +67,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+      - name: Test common ancestor guard
+        run: bash scripts/ci/common_ancestor_guard.test.sh
       - name: Reject unrelated PR history
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! common_ancestor="$(git merge-base origin/master HEAD)" || [[ -z "$common_ancestor" ]]; then
-            echo "::error::This PR has no common ancestor with origin/master; refusing a grafted second root."
-            exit 1
-          fi
-          echo "Common ancestor with origin/master: $common_ancestor"
+        env:
+          HISTORY_CHECK_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/ci/common_ancestor_guard.sh origin/master "$HISTORY_CHECK_SHA"
 
   repo-structure:
     name: Repository Structure
