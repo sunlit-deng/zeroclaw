@@ -8262,7 +8262,7 @@ mod tests {
     #[test]
     fn api_response_parses_gateway_cache_creation_tokens() {
         // Translating gateways forward Anthropic's cache-write counter inside
-        // `prompt_tokens_details` (issue #10699).
+        // `prompt_tokens_details` when providers include that usage detail.
         let json = r#"{
             "choices": [{"message": {"content": "Hello"}}],
             "usage": {
