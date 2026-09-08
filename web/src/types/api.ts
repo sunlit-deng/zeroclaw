@@ -99,6 +99,11 @@ export interface Integration {
   /** Human-readable display label derived by the API from the category enum. */
   category_label: string;
   status: "Available" | "Active";
+  /** Canonical config identifier for entries backed by a schema config slot —
+   *  the model-provider family key (e.g. `"zai"`) or the channel `kind`. Route
+   *  config deep links on this, never on a slug of `name`; `null` when the
+   *  entry has no config section. */
+  key: string | null;
 }
 
 export interface DiagResult {

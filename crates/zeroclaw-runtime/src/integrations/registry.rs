@@ -50,6 +50,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
             description: info.desc.to_string(),
             category: IntegrationCategory::Chat,
             status: bool_to_status(info.configured),
+            key: Some(info.kind.to_string()),
         });
 
     let toggles = config.integration_descriptors().into_iter().map(|d| {
@@ -59,6 +60,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
             description: d.description.to_string(),
             category,
             status: bool_to_status(d.active),
+            key: None,
         }
     });
 
@@ -71,6 +73,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
                 description: String::new(),
                 category: IntegrationCategory::AiModel,
                 status,
+                key: Some(info.name.to_string()),
             }
         });
 
@@ -81,6 +84,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
             description: (*desc).to_string(),
             category: IntegrationCategory::ToolsAutomation,
             status: IntegrationStatus::Active,
+            key: None,
         });
 
     let platforms = PLATFORMS.iter().map(|(name, available)| IntegrationEntry {
@@ -88,6 +92,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
         description: String::new(),
         category: IntegrationCategory::Platform,
         status: bool_to_status(*available),
+        key: None,
     });
 
     channels
@@ -176,7 +181,49 @@ mod tests {
                 "channel {:?} missing description text",
                 info.name,
             );
+            assert_eq!(
+                entry.key.as_deref(),
+                Some(info.kind),
+                "channel {:?} entry must carry its schema kind as the config key",
+                info.name,
+            );
         }
+    }
+
+    #[test]
+    fn ai_model_entries_carry_provider_family_key() {
+        let config = Config::default();
+        let entries = all_integrations(&config);
+        for info in zeroclaw_providers::list_model_providers() {
+            let entry = entries
+                .iter()
+                .find(|e| e.category == IntegrationCategory::AiModel && e.name == info.display_name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "AI-model entry for {:?} (display {:?}) must exist",
+                        info.name, info.display_name,
+                    )
+                });
+            assert_eq!(
+                entry.key.as_deref(),
+                Some(info.name),
+                "AI-model entry {:?} must carry the provider family key, not a display-name slug",
+                info.display_name,
+            );
+        }
+    }
+
+    #[test]
+    fn zai_entry_key_survives_display_name_slug_mismatch() {
+        // Regression for #10690: the Z.AI display name slugifies to
+        // `z-ai`, but the config slot is `providers.models.zai`.
+        let config = Config::default();
+        let entries = all_integrations(&config);
+        let zai = entries
+            .iter()
+            .find(|e| e.category == IntegrationCategory::AiModel && e.key.as_deref() == Some("zai"))
+            .expect("Z.AI registry entry with family key `zai`");
+        assert_eq!(zai.name, "Z.AI");
     }
 
     #[test]

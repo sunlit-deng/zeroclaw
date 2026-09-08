@@ -46,6 +46,13 @@ pub struct IntegrationEntry {
     pub description: String,
     pub category: IntegrationCategory,
     pub status: IntegrationStatus,
+    /// Canonical config identifier for entries that map to a schema config
+    /// slot — the model-provider family key for AI-model entries and the
+    /// channel `kind` for chat entries. Config deep links must route on this
+    /// key, never on a slug of the human-readable `name`; the two only
+    /// coincide by luck for some entries. `None` for entries without a
+    /// config section.
+    pub key: Option<String>,
 }
 
 /// Handle the `integrations` CLI command
