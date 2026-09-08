@@ -1434,7 +1434,6 @@ mod tests {
             vec!["chat-session-a".to_string(), "chat-session-b".to_string()],
             "two chat sessions on one daemon must stay separable in the ledger"
         );
-
     }
 
     #[test]
