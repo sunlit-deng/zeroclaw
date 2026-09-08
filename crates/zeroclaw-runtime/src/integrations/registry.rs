@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn zai_entry_key_survives_display_name_slug_mismatch() {
-        // Regression for #10690: the Z.AI display name slugifies to
+        // Regression: the Z.AI display name slugifies to
         // `z-ai`, but the config slot is `providers.models.zai`.
         let config = Config::default();
         let entries = all_integrations(&config);
