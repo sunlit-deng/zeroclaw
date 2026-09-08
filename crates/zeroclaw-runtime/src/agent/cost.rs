@@ -116,6 +116,9 @@ fn apply_rate_sheet_pricing(config: &Config, provider_type: &str, slot: &mut Has
         if let Some(cached) = rates.cached_input_per_mtok {
             slot.insert(format!("{model_id}.cached_input"), cached);
         }
+        if let Some(write) = rates.cache_write_per_mtok {
+            slot.insert(format!("{model_id}.cache_write"), write);
+        }
     }
 }
 
@@ -193,6 +196,7 @@ fn resolve_rates_opt(pricing: &HashMap<String, f64>, model: &str) -> ModelRates 
         let input = pricing.get(&format!("{key}.input")).copied();
         let output = pricing.get(&format!("{key}.output")).copied();
         let cached = pricing.get(&format!("{key}.cached_input")).copied();
+        let write = pricing.get(&format!("{key}.cache_write")).copied();
         let flat = pricing.get(key).copied();
         if input.is_none() && output.is_none() && cached.is_none() && flat.is_none() {
             None
@@ -201,6 +205,7 @@ fn resolve_rates_opt(pricing: &HashMap<String, f64>, model: &str) -> ModelRates 
                 input_per_mtok: input.or(flat),
                 output_per_mtok: output.or(flat),
                 cached_input_per_mtok: cached,
+                cache_write_per_mtok: write,
             })
         }
     };
@@ -229,6 +234,7 @@ fn normalized_rates(rates: ModelRates) -> ModelRates {
         input_per_mtok: valid(rates.input_per_mtok),
         output_per_mtok: valid(rates.output_per_mtok),
         cached_input_per_mtok: valid(rates.cached_input_per_mtok),
+        cache_write_per_mtok: valid(rates.cache_write_per_mtok),
     }
 }
 
@@ -418,6 +424,7 @@ fn record_tool_loop_cost_usage_inner(
             input_per_mtok: (cat_in > 0.0).then_some(cat_in),
             output_per_mtok: (cat_out > 0.0).then_some(cat_out),
             cached_input_per_mtok: (cat_cached > 0.0).then_some(cat_cached),
+            cache_write_per_mtok: None,
         });
     }
 
@@ -426,14 +433,21 @@ fn record_tool_loop_cost_usage_inner(
     let input_rate = rates.input_per_mtok.unwrap_or(0.0);
     let output_rate = rates.output_per_mtok.unwrap_or(0.0);
     let cached_rate = rates.cached_input_per_mtok.unwrap_or(0.0);
+    let write_rate = rates.cache_write_per_mtok.unwrap_or(0.0);
+    let cache_creation_input_tokens = usage
+        .cache_creation_input_tokens
+        .unwrap_or(0)
+        .min(input_tokens.saturating_sub(cached_input_tokens));
 
-    let mut cost_usage = CostTokenUsage::new_with_cache(
+    let mut cost_usage = CostTokenUsage::new_with_cache_write(
         model,
         input_tokens,
         cached_input_tokens,
+        cache_creation_input_tokens,
         output_tokens,
         input_rate,
         cached_rate,
+        write_rate,
         output_rate,
     );
     cost_usage.unpriced_tokens = unpriced.tokens;
@@ -700,6 +714,7 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(20),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
 
         let (_, cost_usd) = tokio::runtime::Runtime::new()
@@ -850,6 +865,7 @@ mod tests {
                     input_tokens: Some(1_000_000),
                     output_tokens: Some(0),
                     cached_input_tokens: None,
+                    cache_creation_input_tokens: None,
                 }),
                 reasoning_content: None,
             })
@@ -868,6 +884,7 @@ mod tests {
             input_per_mtok: Some(99.0),
             output_per_mtok: Some(15.0),
             cached_input_per_mtok: Some(1.5),
+            cache_write_per_mtok: None,
         });
         assert_eq!(
             merge_config_and_live_rates(config, live),
@@ -875,6 +892,7 @@ mod tests {
                 input_per_mtok: Some(5.0),
                 output_per_mtok: Some(15.0),
                 cached_input_per_mtok: Some(1.5),
+                cache_write_per_mtok: None,
             }
         );
     }
@@ -894,17 +912,20 @@ mod tests {
                     input_per_mtok: Some(0.0),
                     output_per_mtok: Some(0.0),
                     cached_input_per_mtok: None,
+                    cache_write_per_mtok: None,
                 },
                 Some(ModelRates {
                     input_per_mtok: Some(3.0),
                     output_per_mtok: Some(9.0),
                     cached_input_per_mtok: Some(0.3),
+                    cache_write_per_mtok: None,
                 })
             ),
             ModelRates {
                 input_per_mtok: Some(0.0),
                 output_per_mtok: Some(0.0),
                 cached_input_per_mtok: Some(0.3),
+                cache_write_per_mtok: None,
             }
         );
     }
@@ -915,6 +936,7 @@ mod tests {
             input_per_mtok: Some(0.0),
             output_per_mtok: None,
             cached_input_per_mtok: None,
+            cache_write_per_mtok: None,
         };
         assert_eq!(unpriced_tokens_for_usage(input_only, 100, 0, 0), 0);
         assert_eq!(unpriced_tokens_for_usage(input_only, 100, 0, 1), 1);
@@ -928,6 +950,7 @@ mod tests {
             input_per_mtok: None,
             output_per_mtok: None,
             cached_input_per_mtok: Some(0.0),
+            cache_write_per_mtok: None,
         };
         assert_eq!(unpriced_tokens_for_usage(cached_only, 100, 100, 0), 0);
         assert_eq!(unpriced_tokens_for_usage(cached_only, 100, 99, 0), 1);
@@ -943,6 +966,7 @@ mod tests {
             input_per_mtok: Some(-1.0),
             output_per_mtok: Some(f64::INFINITY),
             cached_input_per_mtok: Some(f64::MAX),
+            cache_write_per_mtok: None,
         });
         assert_eq!(normalized.input_per_mtok, None);
         assert_eq!(normalized.output_per_mtok, None);
@@ -953,6 +977,7 @@ mod tests {
             input_per_mtok: Some(0.0),
             output_per_mtok: Some(0.0),
             cached_input_per_mtok: Some(0.0),
+            cache_write_per_mtok: None,
         });
         assert!(configured_free.is_complete());
         assert_eq!(unpriced_tokens_for_usage(configured_free, 100, 80, 20), 0);
@@ -1137,6 +1162,18 @@ mod tests {
         map
     }
 
+    fn pricing_with_cache_write(
+        model: &str,
+        input: f64,
+        cached_input: f64,
+        cache_write: f64,
+        output: f64,
+    ) -> HashMap<String, f64> {
+        let mut map = pricing_with_cache(model, input, cached_input, output);
+        map.insert(format!("{model}.cache_write"), cache_write);
+        map
+    }
+
     #[test]
     fn build_model_provider_pricing_prefers_rate_sheet_over_legacy_alias_pricing() {
         let mut config = Config::default();
@@ -1156,6 +1193,7 @@ mod tests {
                 input_per_mtok: Some(0.14),
                 output_per_mtok: Some(0.28),
                 cached_input_per_mtok: Some(0.0028),
+                cache_write_per_mtok: None,
             },
         );
 
@@ -1240,6 +1278,7 @@ mod tests {
                 input_per_mtok: Some(0.14),
                 output_per_mtok: Some(0.28),
                 cached_input_per_mtok: Some(0.0028),
+                cache_write_per_mtok: None,
             },
         );
 
@@ -1318,6 +1357,7 @@ mod tests {
             input_tokens: Some(5_000),
             output_tokens: Some(200),
             cached_input_tokens: Some(4_000),
+            cache_creation_input_tokens: Some(1_000),
         };
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1362,6 +1402,7 @@ mod tests {
             input_tokens: Some(5_000),
             output_tokens: Some(200),
             cached_input_tokens: Some(4_000),
+            cache_creation_input_tokens: None,
         };
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1393,6 +1434,53 @@ mod tests {
             vec!["chat-session-a".to_string(), "chat-session-b".to_string()],
             "two chat sessions on one daemon must stay separable in the ledger"
         );
+
+    }
+
+    #[test]
+    fn record_tool_loop_cost_usage_bills_cache_writes_at_the_write_rate() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let tracker = Arc::new(
+            CostTracker::new(
+                zeroclaw_config::schema::CostConfig::default(),
+                workspace.path(),
+            )
+            .unwrap(),
+        );
+        let ctx = ToolLoopCostTrackingContext::new(
+            Arc::clone(&tracker),
+            Arc::new(HashMap::from([(
+                "deepseek".to_string(),
+                pricing_with_cache_write("deepseek-chat", 0.27, 0.027, 0.54, 1.10),
+            )])),
+        );
+        let usage = zeroclaw_providers::traits::TokenUsage {
+            input_tokens: Some(5_000),
+            output_tokens: Some(200),
+            cached_input_tokens: Some(4_000),
+            cache_creation_input_tokens: Some(1_000),
+        };
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (total_tokens, cost_usd) = runtime
+            .block_on(TOOL_LOOP_COST_TRACKING_CONTEXT.scope(Some(ctx), async {
+                record_tool_loop_cost_usage("deepseek", "deepseek-chat", &usage)
+            }))
+            .expect("cost usage");
+
+        // 0 uncached @ input rate + 1_000 cache writes @ the write premium
+        // + 4_000 cached reads + 200 output.
+        let expected = (1_000.0 * 0.54 / 1_000_000.0)
+            + (4_000.0 * 0.027 / 1_000_000.0)
+            + (200.0 * 1.10 / 1_000_000.0);
+        assert_eq!(total_tokens, 5_200);
+        assert!((cost_usd - expected).abs() < 1e-12);
+
+        let stored = std::fs::read_to_string(workspace.path().join("state").join("costs.jsonl"))
+            .expect("costs.jsonl should be written");
+        let record: zeroclaw_config::cost::types::CostRecord =
+            serde_json::from_str(stored.lines().next().expect("one record")).unwrap();
+        assert_eq!(record.usage.cache_creation_input_tokens, 1_000);
     }
 
     #[test]
@@ -1416,6 +1504,7 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(50),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1478,6 +1567,7 @@ mod tests {
                 input_per_mtok: Some(-1.0),
                 output_per_mtok: Some(f64::INFINITY),
                 cached_input_per_mtok: None,
+                cache_write_per_mtok: None,
             },
         );
         let mut pricing = build_model_provider_pricing(&config);
@@ -1490,6 +1580,7 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(20),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -1543,6 +1634,7 @@ mod tests {
             input_tokens: Some(10_000_000),
             output_tokens: Some(0),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
 
         let result = tokio::runtime::Runtime::new()
@@ -1592,6 +1684,7 @@ mod tests {
             input_tokens: Some(5_000),
             output_tokens: Some(200),
             cached_input_tokens: Some(4_000),
+            cache_creation_input_tokens: Some(1_000),
         };
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1623,11 +1716,13 @@ mod tests {
             input_tokens: Some(80),
             output_tokens: Some(5),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
         let accepted = zeroclaw_providers::traits::TokenUsage {
             input_tokens: Some(80),
             output_tokens: Some(7),
             cached_input_tokens: Some(0),
+            cache_creation_input_tokens: None,
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(TOOL_LOOP_TURN_USAGE.scope(
