@@ -23,8 +23,8 @@ fn integration_entry_json(
         "category": entry.category,
         "category_label": entry.category.label(),
         "status": entry.status,
-        // Canonical config key (provider family key / channel kind) for
-        // deep links; null when the entry has no config section.
+        // Canonical config map key (provider family key / ChannelsConfig map
+        // key) for deep links; null when the entry has no config section.
         "key": &entry.key,
     })
 }

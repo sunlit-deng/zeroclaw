@@ -14,9 +14,13 @@ test('model providers route on the API config key, not a display-name slug', () 
   );
 });
 
-test('chat channels route on the channel kind key', () => {
+test('chat channels route on the ChannelsConfig map key', () => {
   assert.equal(configHref('Telegram', 'Chat', 'telegram'), '/config/channels/telegram');
   assert.equal(configHref('WhatsApp', 'Chat', 'whatsapp'), '/config/channels/whatsapp');
+  assert.equal(configHref('WhatsApp Web', 'Chat', 'whatsapp'), '/config/channels/whatsapp');
+  assert.equal(configHref('NextCloud Talk', 'Chat', 'nextcloud_talk'), '/config/channels/nextcloud_talk');
+  assert.equal(configHref('Gmail Push', 'Chat', 'gmail_push'), '/config/channels/gmail_push');
+  assert.equal(configHref('WeCom WebSocket', 'Chat', 'wecom_ws'), '/config/channels/wecom_ws');
 });
 
 test('entries without a config key fall back to the bare section', () => {

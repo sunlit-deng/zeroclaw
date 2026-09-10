@@ -24,8 +24,8 @@ const TOOLS_AUTOMATION_ROUTES: Record<string, string> = {
  *  entries (macOS / Linux / Windows) are compile-time OS facts with nothing to
  *  set up — so the card renders as an inert status tile instead of dead-ending
  *  on the bare /config root. Entries backed by a schema config slot carry the
- *  API's canonical `key` (model-provider family key, channel type kind) and
- *  deep-link to that exact section; a display-name slug cannot be made
+ *  API's canonical `key` (model-provider family key, ChannelsConfig map key)
+ *  and deep-link to that exact section; a display-name slug cannot be made
  *  reliable (`Z.AI` → `z-ai` vs slot `zai`), so entries without a key fall
  *  back to the bare section instead. Built-in tools go to the Tools page
  *  (allow/block per risk profile), and Cron (a config-backed automation) to

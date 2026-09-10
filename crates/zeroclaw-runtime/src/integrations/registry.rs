@@ -50,7 +50,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
             description: info.desc.to_string(),
             category: IntegrationCategory::Chat,
             status: bool_to_status(info.configured),
-            key: Some(info.kind.to_string()),
+            key: Some(info.config_key.to_string()),
         });
 
     let toggles = config.integration_descriptors().into_iter().map(|d| {
@@ -183,9 +183,35 @@ mod tests {
             );
             assert_eq!(
                 entry.key.as_deref(),
-                Some(info.kind),
-                "channel {:?} entry must carry its schema kind as the config key",
+                Some(info.config_key),
+                "channel {:?} entry must carry its schema config map key",
                 info.name,
+            );
+        }
+    }
+
+    #[test]
+    fn config_backed_entries_resolve_through_their_map_key_contract() {
+        let config = Config::default();
+        for entry in all_integrations(&config).iter().filter(|entry| {
+            matches!(
+                entry.category,
+                IntegrationCategory::Chat | IntegrationCategory::AiModel
+            )
+        }) {
+            let key = entry
+                .key
+                .as_deref()
+                .unwrap_or_else(|| panic!("config-backed entry {:?} has no key", entry.name));
+            let path = match entry.category {
+                IntegrationCategory::Chat => format!("channels.{key}"),
+                IntegrationCategory::AiModel => format!("providers.models.{key}"),
+                _ => unreachable!(),
+            };
+            assert!(
+                config.get_map_keys(&path).is_some(),
+                "config-backed entry {:?} must resolve through map path `{path}`",
+                entry.name,
             );
         }
     }
